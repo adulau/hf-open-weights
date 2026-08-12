@@ -131,6 +131,27 @@ gating, plus total downloads, likes, and followers. Multi-country and
 multi-language models are counted once in each declared group. Pass
 `--stats ""` to disable it.
 
+## Statistics visualization
+
+Turn the statistics JSON into a responsive, interactive HTML dashboard:
+
+```bash
+python visualize_stats.py
+```
+
+This writes `hf-open-weights-stats.html`. It is self-contained (with no web
+fonts, JavaScript libraries, or other network dependencies), so it can be
+opened directly in a browser or shared as a single file. Choose a grouping from
+the **Explore** menu to compare organizations, countries, languages, licenses,
+pipelines, libraries, training documentation, or access status.
+
+Input, output, title, and the number of visible groups can be customized:
+
+```bash
+python visualize_stats.py custom-stats.json \
+  --output report.html --title "Open-weight model landscape" --top 20
+```
+
 ## Training provenance
 
 `training_text` contains Markdown sections whose headings indicate training,
