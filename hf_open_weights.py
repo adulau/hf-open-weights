@@ -46,6 +46,9 @@ Examples:
   # Test on the first 500 models returned by the Hub
   python hf_open_weights.py --limit 500
 
+  # Start with the models that have received the most likes (stars)
+  python hf_open_weights.py --sort most-starred --limit 500
+
   # Strictly use conventional open-source/open-content licenses
   python hf_open_weights.py --policy strict
 
@@ -982,6 +985,7 @@ def iter_candidates(
     policy: str,
     limit: int | None,
     since: datetime | None,
+    sort: str,
 ) -> Iterator[tuple[Any, dict[str, Any], list[str]]]:
     """
     Stream ModelInfo records. We request the repository file list, but defer
@@ -995,8 +999,12 @@ def iter_candidates(
     per-repository error handling, so parsing card data here is both redundant
     and less resilient.
     """
+    hub_sort = {
+        "last-modified": "lastModified",
+        "most-starred": "likes",
+    }[sort]
     models = api.list_models(
-        sort="lastModified",
+        sort=hub_sort,
         limit=limit,
         full=True,
     )
@@ -1007,10 +1015,16 @@ def iter_candidates(
 
         if since is not None:
             modified = model_last_modified(model)
-            # list_models(sort="lastModified") is newest first. Once we reach an
-            # older record we can stop instead of enumerating the whole Hub.
-            if modified is not None and modified < since:
+            # Only last-modified results are chronological. With another sort,
+            # keep scanning because a newer model can follow an older one.
+            if (
+                sort == "last-modified"
+                and modified is not None
+                and modified < since
+            ):
                 break
+            if modified is not None and modified < since:
+                continue
 
         weight_files = model_weight_files(model)
         if not weight_files:
@@ -1034,7 +1048,7 @@ def crawl(args: argparse.Namespace) -> None:
     since = parse_since(args.since)
 
     eprint(
-        f"Scanning Hugging Face models: policy={args.policy}, "
+        f"Scanning Hugging Face models: policy={args.policy}, sort={args.sort}, "
         f"workers={args.workers}, since={isoformat(since) if since else 'beginning'}"
     )
 
@@ -1096,6 +1110,7 @@ def crawl(args: argparse.Namespace) -> None:
                 policy=args.policy,
                 limit=args.limit,
                 since=since,
+                sort=args.sort,
             ):
                 scanned += 1
                 candidates += 1
@@ -1194,12 +1209,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Limit Hub models enumerated; useful for testing.",
     )
     parser.add_argument(
+        "--sort",
+        choices=("last-modified", "most-starred"),
+        default="last-modified",
+        help=(
+            "Order models by latest modification (default) or start with the "
+            "most-liked/starred models."
+        ),
+    )
+    parser.add_argument(
         "--since",
         default=None,
         help=(
             "Only scan models modified at/after this ISO-8601 timestamp. "
-            "Because results are sorted by lastModified, the crawler stops "
-            "when it reaches older models."
+            "With --sort last-modified, the crawler stops when it reaches "
+            "older models."
         ),
     )
     parser.add_argument(
