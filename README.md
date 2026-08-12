@@ -3,7 +3,8 @@
 `hf_open_weights.py` builds a local catalogue of Hugging Face model repositories
 that contain recognizable weight files. It records license information,
 training-related Model Card sections, and datasets declared or linked by the
-model author.
+model author. It also collects organization, explicitly declared country,
+language, and tag metadata and produces aggregate statistics.
 
 ## Install
 
@@ -32,6 +33,7 @@ This creates:
 - `hf-open-weights.sqlite`
 - `hf-open-weights.csv`
 - `hf-open-weights.jsonl`
+- `hf-open-weights-stats.json`
 
 Test on a smaller sample:
 
@@ -86,6 +88,26 @@ The output contains:
 
 A missing dataset means “not discovered/documented by this script”, not “the
 model was trained without a dataset”.
+
+## Publisher metadata and statistics
+
+The CSV, JSONL, and SQLite outputs include:
+
+- `organization`: the Model Card's custom `organization`/`organisation` value,
+  falling back to the repository namespace;
+- `organization_source`: either `model-card` or `repository-namespace`, so the
+  fallback is not mistaken for a verified legal organization;
+- `countries`: values explicitly declared under custom `country` or `countries`
+  Model Card keys;
+- `languages` and `tags`: normalized structured Model Card values.
+
+Country is deliberately **not inferred** from a person's name, organization,
+language, or free-form card text. Missing country data remains missing.
+
+`hf-open-weights-stats.json` contains model counts grouped by organization,
+country, language, license, pipeline, library, training-information status, and
+gating, plus total downloads and likes. Multi-country and multi-language models
+are counted once in each declared group. Pass `--stats ""` to disable it.
 
 ## Training provenance
 
