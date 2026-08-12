@@ -984,14 +984,21 @@ def iter_candidates(
     since: datetime | None,
 ) -> Iterator[tuple[Any, dict[str, Any], list[str]]]:
     """
-    Stream ModelInfo records. We request full metadata once so file names and
-    cardData can be inspected without a separate model_info() call per repo.
+    Stream ModelInfo records. We request the repository file list, but defer
+    loading Model Card data to ``fetch_card``.
+
+    Asking ``list_models`` for ``cardData`` makes huggingface_hub construct a
+    ModelCardData object for every search result. One malformed card can then
+    abort the entire lazy result iterator (for example, ``eval_results``
+    without ``model_name``). Tags already contain the license information
+    needed for this initial filter, and candidate cards are fetched below with
+    per-repository error handling, so parsing card data here is both redundant
+    and less resilient.
     """
     models = api.list_models(
         sort="lastModified",
         limit=limit,
         full=True,
-        cardData=True,
     )
 
     for model in models:
