@@ -1,0 +1,113 @@
+# Hugging Face open-weight model catalogue
+
+`hf_open_weights.py` builds a local catalogue of Hugging Face model repositories
+that contain recognizable weight files. It records license information,
+training-related Model Card sections, and datasets declared or linked by the
+model author.
+
+## Install
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -U huggingface_hub
+```
+
+Optionally:
+
+```bash
+export HF_TOKEN="hf_..."
+```
+
+## Run
+
+Default policy:
+
+```bash
+python hf_open_weights.py
+```
+
+This creates:
+
+- `hf-open-weights.sqlite`
+- `hf-open-weights.csv`
+- `hf-open-weights.jsonl`
+
+Test on a smaller sample:
+
+```bash
+python hf_open_weights.py --limit 500
+```
+
+Strict open-source/open-content licenses only:
+
+```bash
+python hf_open_weights.py --policy strict
+```
+
+Every public repository exposing recognizable model-weight files, regardless of
+license classification:
+
+```bash
+python hf_open_weights.py --policy public-weights
+```
+
+Scan recently changed models:
+
+```bash
+python hf_open_weights.py --since 2026-08-01T00:00:00Z
+```
+
+## License classes
+
+The script deliberately does **not** claim Hugging Face has an authoritative
+`open_weight` flag.
+
+It classifies declared Model Card licenses into:
+
+- `open-source`: conventional open-source/open-content licenses;
+- `open-weight`: model licenses commonly described as open-weight/source-available,
+  including OpenRAIL, Llama, Gemma, and similar families;
+- `restricted`: clearly research-only, non-commercial, or otherwise limited;
+- `unknown`: missing, custom, or not safely auto-classifiable.
+
+The default `--policy open-weight` includes the first two classes.
+
+Always inspect the actual model repository and license before redistribution or
+production use.
+
+## Dataset provenance
+
+The output contains:
+
+- `datasets_declared`: structured `datasets:` Model Card metadata;
+- `datasets_linked`: Hugging Face dataset URLs found in the card text;
+- `datasets_all`: union of the two.
+
+A missing dataset means “not discovered/documented by this script”, not “the
+model was trained without a dataset”.
+
+## Training provenance
+
+`training_text` contains Markdown sections whose headings indicate training,
+pretraining, post-training, fine-tuning, hyperparameters, optimization, or
+training data. This is deterministic section extraction, not an LLM-generated
+summary.
+
+`training_info_status` is one of:
+
+- `training-text-and-datasets`
+- `training-text-only`
+- `datasets-only`
+- `not-documented`
+
+## Scheduling
+
+For a daily update, for example:
+
+```cron
+15 3 * * * cd /srv/hf-catalogue && .venv/bin/python hf_open_weights.py --since "$(date -u -d '2 days ago' +\%FT\%TZ)" >>crawl.log 2>&1
+```
+
+Using a small overlap (two days above) makes the update tolerant of scheduling
+gaps; SQLite uses `model_id` as the primary key and upserts records.
