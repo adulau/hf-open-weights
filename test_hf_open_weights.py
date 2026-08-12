@@ -53,7 +53,12 @@ class IterCandidatesTests(unittest.TestCase):
 
         self.assertEqual([(model, {}, ["model.safetensors"])], candidates)
         self.assertEqual(
-            {"sort": "lastModified", "limit": None, "full": True},
+            {
+                "sort": "lastModified",
+                "direction": -1,
+                "limit": None,
+                "full": True,
+            },
             api.list_models_kwargs,
         )
 
@@ -71,7 +76,12 @@ class IterCandidatesTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            {"sort": "likes", "limit": 25, "full": True},
+            {
+                "sort": "likes",
+                "direction": -1,
+                "limit": 25,
+                "full": True,
+            },
             api.list_models_kwargs,
         )
 
