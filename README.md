@@ -41,6 +41,18 @@ Test on a smaller sample:
 python hf_open_weights.py --limit 500
 ```
 
+Start with the models that have the most Hugging Face likes (also commonly
+called stars):
+
+```bash
+python hf_open_weights.py --sort most-starred --limit 500
+```
+
+The default, `--sort last-modified`, starts with the most recently modified
+models. `--since` can be combined with either ordering; with `most-starred`, the
+crawler checks the timestamp of every enumerated model rather than stopping at
+the first old model.
+
 Strict open-source/open-content licenses only:
 
 ```bash

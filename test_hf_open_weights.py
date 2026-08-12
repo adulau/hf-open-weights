@@ -41,7 +41,11 @@ class IterCandidatesTests(unittest.TestCase):
 
         candidates = list(
             hf_open_weights.iter_candidates(
-                api, policy="open-weight", limit=None, since=None
+                api,
+                policy="open-weight",
+                limit=None,
+                since=None,
+                sort="last-modified",
             )
         )
 
@@ -49,6 +53,33 @@ class IterCandidatesTests(unittest.TestCase):
         self.assertEqual(
             {"sort": "lastModified", "limit": None, "full": True},
             api.list_models_kwargs,
+        )
+
+    def test_can_start_with_most_starred_models(self):
+        api = RecordingApi([])
+
+        list(
+            hf_open_weights.iter_candidates(
+                api,
+                policy="open-weight",
+                limit=25,
+                since=None,
+                sort="most-starred",
+            )
+        )
+
+        self.assertEqual(
+            {"sort": "likes", "limit": 25, "full": True},
+            api.list_models_kwargs,
+        )
+
+    def test_parser_defaults_to_last_modified_sort(self):
+        parser = hf_open_weights.build_parser()
+
+        self.assertEqual("last-modified", parser.parse_args([]).sort)
+        self.assertEqual(
+            "most-starred",
+            parser.parse_args(["--sort", "most-starred"]).sort,
         )
 
 
