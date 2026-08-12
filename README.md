@@ -48,6 +48,12 @@ called stars):
 python hf_open_weights.py --sort most-starred --limit 500
 ```
 
+The Hub request explicitly uses descending order, so the most-liked models are
+scanned first. SQLite tables have no implicit row order; inspect the stored
+results with `SELECT model_id, likes FROM models ORDER BY likes DESC LIMIT 5;`
+rather than relying on insertion order. This is especially important when
+reusing a database from an earlier scan because upserts do not reorder rows.
+
 The default, `--sort last-modified`, starts with the most recently modified
 models. `--since` can be combined with either ordering; with `most-starred`, the
 crawler checks the timestamp of every enumerated model rather than stopping at

@@ -1018,6 +1018,10 @@ def iter_candidates(
     }[sort]
     models = api.list_models(
         sort=hub_sort,
+        # Be explicit rather than relying on the Hub client's default. Some
+        # huggingface_hub versions/API paths default to ascending order when a
+        # sort field is supplied, which makes ``likes`` start at zero.
+        direction=-1,
         limit=limit,
         full=True,
     )
