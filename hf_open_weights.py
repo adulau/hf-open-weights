@@ -29,6 +29,10 @@ uses both structured Model Card metadata and Hugging Face dataset links found
 in the card text. Missing information is reported as missing; it is never
 guessed.
 
+The catalogue also retains statistics-friendly publisher and geographic
+metadata. ``organization`` falls back to the repository namespace, while
+``countries`` only contains values explicitly declared in Model Card metadata.
+
 Examples:
 
   pip install -U huggingface_hub
@@ -232,6 +236,11 @@ class CatalogueRecord:
     model_id: str
     url: str
     author: str | None
+    organization: str | None
+    organization_source: str | None
+    countries: list[str]
+    languages: list[str]
+    tags: list[str]
     last_modified: str | None
     created_at: str | None
     downloads: int | None
@@ -304,6 +313,10 @@ def card_data_to_dict(card_data: Any) -> dict[str, Any]:
         "library_name",
         "language",
         "tags",
+        "organization",
+        "organisation",
+        "country",
+        "countries",
     ):
         if hasattr(card_data, key):
             result[key] = getattr(card_data, key)
@@ -490,6 +503,40 @@ def normalize_base_models(metadata: dict[str, Any]) -> list[str]:
     return sorted(dedupe(as_string_list(metadata.get("base_model"))))
 
 
+def publisher_metadata(
+    metadata: dict[str, Any], model_id: str, author: str | None
+) -> tuple[str | None, str | None, list[str], list[str], list[str]]:
+    """Return publisher/geography fields without inventing missing facts.
+
+    Organization and country are not standard required Model Card fields, but
+    they are commonly present as custom YAML keys. A repository namespace is a
+    useful grouping key for statistics, so it is the documented organization
+    fallback. It must not, however, be interpreted as proof that the namespace
+    is a legal organization. Countries never receive an inferred fallback.
+    """
+    declared_org = metadata.get("organization") or metadata.get("organisation")
+    organizations = as_string_list(declared_org)
+    if organizations:
+        organization = organizations[0]
+        organization_source = "model-card"
+    else:
+        namespace = author or (model_id.split("/", 1)[0] if "/" in model_id else None)
+        organization = str(namespace) if namespace else None
+        organization_source = "repository-namespace" if organization else None
+
+    countries = as_string_list(metadata.get("countries"))
+    countries.extend(as_string_list(metadata.get("country")))
+    languages = as_string_list(metadata.get("language"))
+    tags = as_string_list(metadata.get("tags"))
+    return (
+        organization,
+        organization_source,
+        sorted(dedupe(countries)),
+        sorted(dedupe(languages)),
+        sorted(dedupe(tags)),
+    )
+
+
 def gated_to_string(value: Any) -> str:
     if value is None or value is False:
         return "false"
@@ -550,11 +597,19 @@ def make_record(
     author = getattr(model, "author", None)
     if author is None and "/" in model_id:
         author = model_id.split("/", 1)[0]
+    organization, organization_source, countries, languages, tags = publisher_metadata(
+        metadata, model_id, str(author) if author else None
+    )
 
     return CatalogueRecord(
         model_id=model_id,
         url=f"https://huggingface.co/{model_id}",
         author=str(author) if author else None,
+        organization=organization,
+        organization_source=organization_source,
+        countries=countries,
+        languages=languages,
+        tags=tags,
         last_modified=isoformat(getattr(model, "last_modified", None)),
         created_at=isoformat(getattr(model, "created_at", None)),
         downloads=getattr(model, "downloads", None),
@@ -591,6 +646,11 @@ CREATE TABLE IF NOT EXISTS models (
     model_id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
     author TEXT,
+    organization TEXT,
+    organization_source TEXT,
+    countries_json TEXT NOT NULL DEFAULT '[]',
+    languages_json TEXT NOT NULL DEFAULT '[]',
+    tags_json TEXT NOT NULL DEFAULT '[]',
     last_modified TEXT,
     created_at TEXT,
     downloads INTEGER,
@@ -625,13 +685,16 @@ CREATE INDEX IF NOT EXISTS idx_models_gated
 
 UPSERT = """
 INSERT INTO models (
-    model_id, url, author, last_modified, created_at, downloads, likes, gated,
+    model_id, url, author, organization, organization_source, countries_json,
+    languages_json, tags_json, last_modified, created_at, downloads, likes, gated,
     pipeline_tag, library_name, base_models_json, weight_files_json,
     weight_file_count, license, license_name, license_link, license_class,
     datasets_declared_json, datasets_linked_json, datasets_all_json,
     training_info_status, training_text, card_fetch_error, scanned_at
 ) VALUES (
-    :model_id, :url, :author, :last_modified, :created_at, :downloads, :likes,
+    :model_id, :url, :author, :organization, :organization_source,
+    :countries_json, :languages_json, :tags_json,
+    :last_modified, :created_at, :downloads, :likes,
     :gated, :pipeline_tag, :library_name, :base_models_json,
     :weight_files_json, :weight_file_count, :license, :license_name,
     :license_link, :license_class, :datasets_declared_json,
@@ -641,6 +704,11 @@ INSERT INTO models (
 ON CONFLICT(model_id) DO UPDATE SET
     url=excluded.url,
     author=excluded.author,
+    organization=excluded.organization,
+    organization_source=excluded.organization_source,
+    countries_json=excluded.countries_json,
+    languages_json=excluded.languages_json,
+    tags_json=excluded.tags_json,
     last_modified=excluded.last_modified,
     created_at=excluded.created_at,
     downloads=excluded.downloads,
@@ -668,12 +736,31 @@ ON CONFLICT(model_id) DO UPDATE SET
 def init_db(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
+    # Add metadata columns to catalogues created by versions before these
+    # fields existed. SQLite has no ADD COLUMN IF NOT EXISTS.
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(models)")}
+    migrations = {
+        "organization": "TEXT",
+        "organization_source": "TEXT",
+        "countries_json": "TEXT NOT NULL DEFAULT '[]'",
+        "languages_json": "TEXT NOT NULL DEFAULT '[]'",
+        "tags_json": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, declaration in migrations.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE models ADD COLUMN {column} {declaration}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_models_organization ON models(organization)"
+    )
     conn.commit()
     return conn
 
 
 def db_dict(record: CatalogueRecord) -> dict[str, Any]:
     d = asdict(record)
+    d["countries_json"] = json.dumps(d.pop("countries"), ensure_ascii=False)
+    d["languages_json"] = json.dumps(d.pop("languages"), ensure_ascii=False)
+    d["tags_json"] = json.dumps(d.pop("tags"), ensure_ascii=False)
     d["base_models_json"] = json.dumps(d.pop("base_models"), ensure_ascii=False)
     d["weight_files_json"] = json.dumps(d.pop("weight_files"), ensure_ascii=False)
     d["datasets_declared_json"] = json.dumps(d.pop("datasets_declared"), ensure_ascii=False)
@@ -691,6 +778,11 @@ def row_to_export_dict(row: sqlite3.Row) -> dict[str, Any]:
         "model_id": row["model_id"],
         "url": row["url"],
         "author": row["author"],
+        "organization": row["organization"],
+        "organization_source": row["organization_source"],
+        "countries": json.loads(row["countries_json"]),
+        "languages": json.loads(row["languages_json"]),
+        "tags": json.loads(row["tags_json"]),
         "last_modified": row["last_modified"],
         "created_at": row["created_at"],
         "downloads": row["downloads"],
@@ -719,6 +811,11 @@ EXPORT_FIELDS = [
     "model_id",
     "url",
     "author",
+    "organization",
+    "organization_source",
+    "countries",
+    "languages",
+    "tags",
     "last_modified",
     "created_at",
     "downloads",
@@ -766,6 +863,9 @@ def export_catalogue(conn: sqlite3.Connection, csv_path: Path | None, jsonl_path
             if writer:
                 csv_item = dict(item)
                 for field in (
+                    "countries",
+                    "languages",
+                    "tags",
                     "base_models",
                     "weight_files",
                     "datasets_declared",
@@ -782,6 +882,75 @@ def export_catalogue(conn: sqlite3.Connection, csv_path: Path | None, jsonl_path
             csv_file.close()
         if jsonl_file:
             jsonl_file.close()
+
+
+def catalogue_statistics(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Build deterministic aggregate counts from the complete local catalogue."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM models")
+    dimensions: dict[str, dict[str, int]] = {
+        name: {}
+        for name in (
+            "organization",
+            "country",
+            "language",
+            "license_class",
+            "license",
+            "pipeline_tag",
+            "library_name",
+            "training_info_status",
+            "gated",
+        )
+    }
+    total = 0
+    downloads = 0
+    likes = 0
+
+    def add(dimension: str, value: Any) -> None:
+        label = str(value).strip() if value is not None else ""
+        label = label or "(missing)"
+        bucket = dimensions[dimension]
+        bucket[label] = bucket.get(label, 0) + 1
+
+    for row in rows:
+        total += 1
+        downloads += row["downloads"] or 0
+        likes += row["likes"] or 0
+        for field in (
+            "organization",
+            "license_class",
+            "license",
+            "pipeline_tag",
+            "library_name",
+            "training_info_status",
+            "gated",
+        ):
+            add(field, row[field])
+        countries = json.loads(row["countries_json"])
+        languages = json.loads(row["languages_json"])
+        for country in countries or [None]:
+            add("country", country)
+        for language in languages or [None]:
+            add("language", language)
+
+    ordered_dimensions = {
+        name: dict(sorted(values.items(), key=lambda item: (-item[1], item[0].casefold())))
+        for name, values in dimensions.items()
+    }
+    return {
+        "model_count": total,
+        "downloads_total": downloads,
+        "likes_total": likes,
+        "dimensions": ordered_dimensions,
+    }
+
+
+def export_statistics(conn: sqlite3.Connection, path: Path | None) -> None:
+    if not path:
+        return
+    with path.open("w", encoding="utf-8") as stats_file:
+        json.dump(catalogue_statistics(conn), stats_file, ensure_ascii=False, indent=2)
+        stats_file.write("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +1113,8 @@ def crawl(args: argparse.Namespace) -> None:
         csv_path = Path(args.csv) if args.csv else None
         jsonl_path = Path(args.jsonl) if args.jsonl else None
         export_catalogue(conn, csv_path, jsonl_path)
+        stats_path = Path(args.stats) if args.stats else None
+        export_statistics(conn, stats_path)
 
         total_db = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
         elapsed = max(time.monotonic() - started, 0.001)
@@ -958,6 +1129,8 @@ def crawl(args: argparse.Namespace) -> None:
             eprint(f"CSV:    {csv_path}")
         if jsonl_path:
             eprint(f"JSONL:  {jsonl_path}")
+        if stats_path:
+            eprint(f"Stats:  {stats_path}")
 
     except KeyboardInterrupt:
         eprint("\nInterrupted; committing records already collected.")
@@ -995,6 +1168,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--jsonl",
         default="hf-open-weights.jsonl",
         help="JSONL export path; use empty string to disable (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--stats",
+        default="hf-open-weights-stats.json",
+        help="Aggregate statistics JSON path; use empty string to disable (default: %(default)s)",
     )
     parser.add_argument(
         "--workers",
