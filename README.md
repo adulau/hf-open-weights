@@ -105,6 +105,9 @@ model was trained without a dataset”.
 
 The CSV, JSONL, and SQLite outputs include:
 
+- `downloads`, `likes`, and `followers`: the per-model engagement counters
+  returned by the Hugging Face Hub (a counter is null when the Hub does not
+  provide it);
 - `organization`: the Model Card's custom `organization`/`organisation` value,
   falling back to the repository namespace;
 - `organization_source`: either `model-card` or `repository-namespace`, so the
@@ -118,8 +121,9 @@ language, or free-form card text. Missing country data remains missing.
 
 `hf-open-weights-stats.json` contains model counts grouped by organization,
 country, language, license, pipeline, library, training-information status, and
-gating, plus total downloads and likes. Multi-country and multi-language models
-are counted once in each declared group. Pass `--stats ""` to disable it.
+gating, plus total downloads, likes, and followers. Multi-country and
+multi-language models are counted once in each declared group. Pass
+`--stats ""` to disable it.
 
 ## Training provenance
 

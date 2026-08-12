@@ -248,6 +248,7 @@ class CatalogueRecord:
     created_at: str | None
     downloads: int | None
     likes: int | None
+    followers: int | None
     gated: str
     pipeline_tag: str | None
     library_name: str | None
@@ -617,6 +618,7 @@ def make_record(
         created_at=isoformat(getattr(model, "created_at", None)),
         downloads=getattr(model, "downloads", None),
         likes=getattr(model, "likes", None),
+        followers=getattr(model, "followers", None),
         gated=gated_to_string(getattr(model, "gated", None)),
         pipeline_tag=getattr(model, "pipeline_tag", None),
         library_name=(
@@ -658,6 +660,7 @@ CREATE TABLE IF NOT EXISTS models (
     created_at TEXT,
     downloads INTEGER,
     likes INTEGER,
+    followers INTEGER,
     gated TEXT NOT NULL,
     pipeline_tag TEXT,
     library_name TEXT,
@@ -689,7 +692,8 @@ CREATE INDEX IF NOT EXISTS idx_models_gated
 UPSERT = """
 INSERT INTO models (
     model_id, url, author, organization, organization_source, countries_json,
-    languages_json, tags_json, last_modified, created_at, downloads, likes, gated,
+    languages_json, tags_json, last_modified, created_at, downloads, likes,
+    followers, gated,
     pipeline_tag, library_name, base_models_json, weight_files_json,
     weight_file_count, license, license_name, license_link, license_class,
     datasets_declared_json, datasets_linked_json, datasets_all_json,
@@ -697,7 +701,7 @@ INSERT INTO models (
 ) VALUES (
     :model_id, :url, :author, :organization, :organization_source,
     :countries_json, :languages_json, :tags_json,
-    :last_modified, :created_at, :downloads, :likes,
+    :last_modified, :created_at, :downloads, :likes, :followers,
     :gated, :pipeline_tag, :library_name, :base_models_json,
     :weight_files_json, :weight_file_count, :license, :license_name,
     :license_link, :license_class, :datasets_declared_json,
@@ -716,6 +720,7 @@ ON CONFLICT(model_id) DO UPDATE SET
     created_at=excluded.created_at,
     downloads=excluded.downloads,
     likes=excluded.likes,
+    followers=excluded.followers,
     gated=excluded.gated,
     pipeline_tag=excluded.pipeline_tag,
     library_name=excluded.library_name,
@@ -748,6 +753,9 @@ def init_db(path: Path) -> sqlite3.Connection:
         "countries_json": "TEXT NOT NULL DEFAULT '[]'",
         "languages_json": "TEXT NOT NULL DEFAULT '[]'",
         "tags_json": "TEXT NOT NULL DEFAULT '[]'",
+        "downloads": "INTEGER",
+        "likes": "INTEGER",
+        "followers": "INTEGER",
     }
     for column, declaration in migrations.items():
         if column not in existing:
@@ -790,6 +798,7 @@ def row_to_export_dict(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "downloads": row["downloads"],
         "likes": row["likes"],
+        "followers": row["followers"],
         "gated": row["gated"],
         "pipeline_tag": row["pipeline_tag"],
         "library_name": row["library_name"],
@@ -823,6 +832,7 @@ EXPORT_FIELDS = [
     "created_at",
     "downloads",
     "likes",
+    "followers",
     "gated",
     "pipeline_tag",
     "library_name",
@@ -908,6 +918,7 @@ def catalogue_statistics(conn: sqlite3.Connection) -> dict[str, Any]:
     total = 0
     downloads = 0
     likes = 0
+    followers = 0
 
     def add(dimension: str, value: Any) -> None:
         label = str(value).strip() if value is not None else ""
@@ -919,6 +930,7 @@ def catalogue_statistics(conn: sqlite3.Connection) -> dict[str, Any]:
         total += 1
         downloads += row["downloads"] or 0
         likes += row["likes"] or 0
+        followers += row["followers"] or 0
         for field in (
             "organization",
             "license_class",
@@ -944,6 +956,7 @@ def catalogue_statistics(conn: sqlite3.Connection) -> dict[str, Any]:
         "model_count": total,
         "downloads_total": downloads,
         "likes_total": likes,
+        "followers_total": followers,
         "dimensions": ordered_dimensions,
     }
 

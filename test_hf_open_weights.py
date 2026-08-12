@@ -1,5 +1,7 @@
 import unittest
 import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -81,6 +83,49 @@ class IterCandidatesTests(unittest.TestCase):
             "most-starred",
             parser.parse_args(["--sort", "most-starred"]).sort,
         )
+
+
+class EngagementMetricsTests(unittest.TestCase):
+    def test_record_keeps_model_engagement_metrics(self):
+        model = SimpleNamespace(
+            id="example/model",
+            downloads=123,
+            likes=45,
+            followers=6,
+            gated=False,
+        )
+
+        record = hf_open_weights.make_record(
+            model,
+            list_metadata={},
+            card_metadata={},
+            linked_datasets=[],
+            training_text=None,
+            card_error=None,
+            weight_files=["model.safetensors"],
+        )
+
+        self.assertEqual(123, record.downloads)
+        self.assertEqual(45, record.likes)
+        self.assertEqual(6, record.followers)
+
+    def test_existing_database_is_migrated_with_engagement_columns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalogue.sqlite"
+            conn = hf_open_weights.sqlite3.connect(path)
+            old_schema = hf_open_weights.SCHEMA.replace(
+                "    followers INTEGER,\n", ""
+            )
+            conn.executescript(old_schema)
+            conn.close()
+
+            conn = hf_open_weights.init_db(path)
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(models)")
+            }
+            conn.close()
+
+        self.assertTrue({"downloads", "likes", "followers"} <= columns)
 
 
 if __name__ == "__main__":
